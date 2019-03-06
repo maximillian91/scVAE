@@ -183,6 +183,8 @@ class GaussianMixtureVariationalAutoencoder(object):
             
             self.x = tf.placeholder(tf.float32, [None, self.feature_size], 'X')
             self.t = tf.placeholder(tf.float32, [None, self.feature_size], 'T')
+            self.labels = tf.placeholder(tf.int32, [None, self.K], 'LABELS')
+            self.clf_mask = tf.placeholder(tf.int32, [None], 'CLF_MASK')
             
             self.learning_rate = tf.placeholder(tf.float32, [],
                 'learning_rate')
@@ -577,7 +579,7 @@ class GaussianMixtureVariationalAutoencoder(object):
                 inputs = self.x,
                 num_outputs = self.hidden_sizes,
                 activation_fn = relu,
-                batch_normalisation = self.batch_normalisation, 
+                batch_normalisation = self.batch_normalisation,
                 is_training = self.is_training,
                 input_dropout_keep_probability =
                     self.dropout_keep_probability_x,
@@ -610,7 +612,7 @@ class GaussianMixtureVariationalAutoencoder(object):
                 )
             ### Parameterise q(y|x) = Cat(pi(x))
             q_y_given_x = distribution["class"](theta)
-        return q_y_given_x 
+        return q_y_given_x
 
     def p_x_given_z_graph(self, z, reuse = False):
         # Decoder - Generative model, p(x|z)
@@ -739,7 +741,7 @@ class GaussianMixtureVariationalAutoencoder(object):
             
             self.q_y_given_x = self.q_y_given_x_graph(self.x)
             self.q_y_logits = self.q_y_given_x.logits
-            self.q_y_probabilities = tf.reduce_mean(self.q_y_given_x.probs, 0) 
+            self.q_y_probabilities = tf.reduce_mean(self.q_y_given_x.probs, 0)
         
         # Z latent space
         with tf.variable_scope("Z"):
@@ -846,7 +848,7 @@ class GaussianMixtureVariationalAutoencoder(object):
             # (B)
             KL_y = p_y_entropy - q_y_given_x_entropy
         else:
-            KL_y =kl_divergence(self.q_y_given_x, self.p_y)
+            KL_y = kl_divergence(self.q_y_given_x, self.p_y)
             p_y_entropy = tf.squeeze(self.p_y.entropy())
 
         KL_y_threshhold = self.proportion_of_free_KL_nats * p_y_entropy
@@ -997,7 +999,7 @@ class GaussianMixtureVariationalAutoencoder(object):
         # (R * S_mc, B, F) --> (B, F)
         # self.p_x_mean = tf.reduce_mean(p_x_mean_weight_given_z, 0)
 
-        log_likelihood_x_z_sum = tf.add_n(log_likelihood_x_z)
+        # log_likelihood_x_z_sum = tf.add_n(log_likelihood_x_z)
 
         # self.ELBO_train_modified = tf.reduce_mean(
         #     log_likelihood_x_z_sum - KL_y
@@ -1018,6 +1020,16 @@ class GaussianMixtureVariationalAutoencoder(object):
         self.KL_all = tf.expand_dims(self.KL, -1)
         self.ENRE = tf.reduce_mean(tf.add_n(log_p_x_given_z_mean))
         self.ELBO = self.ENRE - self.KL
+
+        # Classification error for 
+        self.CLF_ERROR = tf.losses.compute_weighted_loss(
+            tf.nn.softmax_cross_entropy_with_logits(
+                labels=self.labels,
+                logits=tf.reduce_mean(self.q_y_logits, 0)
+            ),
+            weights=self.clf_mask
+        )
+
         self.ELBO_weighted = self.ENRE - self.warm_up_weight * self.kl_weight * (
             self.KL_z + KL_y_modified
         )
@@ -1025,6 +1037,8 @@ class GaussianMixtureVariationalAutoencoder(object):
         #     self.KL_z + KL_y_modified
         # )
         # tf.add_to_collection('losses', self.ELBO)
+
+        self.total_loss = self.ELBO_weighted + self.CLF_ERROR
         
     
     def training(self):
@@ -1047,7 +1061,7 @@ class GaussianMixtureVariationalAutoencoder(object):
             #     global_step = self.global_step
             # )
         
-            gradients = optimiser.compute_gradients(-self.ELBO_weighted)
+            gradients = optimiser.compute_gradients(-self.total_loss)
             # gradients = optimiser.compute_gradients(-self.ELBO_train_modified)
             clipped_gradients = [
                 (tf.clip_by_value(gradient, -1., 1.), variable)
@@ -1303,6 +1317,19 @@ class GaussianMixtureVariationalAutoencoder(object):
                 training_set.class_name_to_class_id[class_name])
         
             training_label_ids = class_names_to_class_ids(training_set.labels)
+
+            # OBS: DO THE SAME FOR VALIDATION ETC.
+            # Onehot encode labels
+            labels_train = numpy.zeros(
+                (training_set.number_of_examples, training_set.number_of_classes)
+            )
+
+            labels_train[numpy.arange(training_set.number_of_examples), training_label_ids] = 1
+
+            N_labels = 10
+            mask_train = numpy.zeros(training_set.number_of_examples)
+            mask_train[numpy.random.permutation(training_set.number_of_examples)[:N_labels]] = 1
+
             if validation_set:
                 validation_label_ids = class_names_to_class_ids(
                     validation_set.labels)
@@ -1483,10 +1510,15 @@ class GaussianMixtureVariationalAutoencoder(object):
                     
                     x_batch = x_train[batch_indices].toarray()
                     t_batch = t_train[batch_indices].toarray()
+                    # OBS: DEFINE LABELS_TRAIN from the IDs
+                    labels_batch = labels_train[batch_indices]
+                    mask_batch = mask_train[batch_indices]
                     
                     feed_dict_batch = {
                         self.x: x_batch,
                         self.t: t_batch,
+                        self.labels: labels_batch,
+                        self.clf_mask: mask_batch,
                         self.is_training: True,
                         self.learning_rate: learning_rate, 
                         self.warm_up_weight: warm_up_weight,
