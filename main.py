@@ -45,8 +45,8 @@ from auxiliary import (
 
 import os
 import argparse
-import itertools
-import random
+#import itertools
+#import random
 
 import warnings
 
@@ -76,6 +76,8 @@ def main(input_file_or_name, data_directory = "data",
     number_of_warm_up_epochs = 0,
     kl_weight = 1,
     proportion_of_free_KL_nats = 0.0,
+    clf_weight = 1.0,
+    number_of_labeled_examples = 0,
     batch_normalisation = True,
     dropout_keep_probabilities = [],
     count_sum = True,
@@ -329,6 +331,8 @@ def main(input_file_or_name, data_directory = "data",
             count_sum = count_sum,
             number_of_warm_up_epochs = number_of_warm_up_epochs,
             kl_weight = kl_weight,
+            clf_weight = clf_weight,
+            number_of_labeled_examples = number_of_labeled_examples,
             log_directory = log_directory,
             results_directory = results_directory
         )
@@ -1087,7 +1091,7 @@ parser.add_argument(
 parser.add_argument(
     "--kl-weight",
     type = float,
-    default = 1,
+    default = 1.0,
     help = "weighting of KL divergence"
 )
 parser.add_argument(
@@ -1096,6 +1100,18 @@ parser.add_argument(
     nargs = "?",
     default = 0.0,
     help = "Proportion of maximum KL_y divergence which has constant term and zero gradients, ´free bits´ method"
+)
+parser.add_argument(
+    "--clf-weight", "-c",
+    type = float,
+    default = 1.0,
+    help = "weighting of classification term"
+)
+parser.add_argument(
+    "--number-of-labeled-examples", "-A",
+    type = int,
+    default = 100,
+    help = "labeled pool size used when training"
 )
 parser.add_argument(
     "--batch-normalisation", "-b",
