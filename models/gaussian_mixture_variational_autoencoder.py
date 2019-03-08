@@ -1326,7 +1326,7 @@ class GaussianMixtureVariationalAutoencoder(object):
 
             labels_train[numpy.arange(training_set.number_of_examples), training_label_ids] = 1
 
-            N_labels = 10
+            N_labels = 1000
             mask_train = numpy.zeros(training_set.number_of_examples)
             mask_train[numpy.random.permutation(training_set.number_of_examples)[:N_labels]] = 1
 

@@ -691,12 +691,12 @@ def heading(string, underline_symbol = "-", plain = False):
 
 def title(string, plain = False):
     underline_symbol = "═"
-    return heading(string, underline_symbol, plain)
+    return heading(string, underline_symbol, plain).encode('utf-8')
 
 def subtitle(string, plain = False):
     underline_symbol = "─"
-    return heading(string, underline_symbol, plain)
+    return heading(string, underline_symbol, plain).encode('utf-8')
 
 def subheading(string, plain = False):
     underline_symbol = "╌"
-    return heading(string, underline_symbol, plain)
+    return heading(string, underline_symbol, plain).encode('utf-8')
