@@ -3188,13 +3188,15 @@ def plotLearningCurves(curves, model_type, epoch_offset = 0, epoch_slice = slice
             figsize = (6.4, 9.6))
         figure.subplots_adjust(hspace = 0.1)
     elif model_type == "GMVAE":
-        figure, (axis_1, axis_2, axis_3) = pyplot.subplots(3, sharex = True,
+        figure, (axis_1, axis_2, axis_3, axis_4) = pyplot.subplots(4,
+            sharex = True,
             figsize = (6.4, 14.4))
         figure.subplots_adjust(hspace = 0.1)
     
     axis_1_lim = []
     axis_2_lim = []
     axis_3_lim = []
+    axis_4_lim = []
 
     for curve_set_name, curve_set in sorted(curves.items()):
         
@@ -3271,6 +3273,13 @@ def plotLearningCurves(curves, model_type, epoch_offset = 0, epoch_slice = slice
                     min(numpy.concatenate((curve, axis_1_lim))),
                     max(numpy.concatenate((curve, axis_1_lim)))
                 ]
+            elif curve_name == "clf_error":
+                colour = curve_colour(0)
+                axis = axis_4
+                axis_4_lim = [
+                    min(numpy.concatenate((curve, axis_4_lim))),
+                    max(numpy.concatenate((curve, axis_4_lim)))
+                ]
             epochs = numpy.arange(len(curve)) + epoch_offset + 1
             label = curve_name + " ({} set)".format(curve_set_name)
             axis.plot(
@@ -3304,14 +3313,14 @@ def plotLearningCurves(curves, model_type, epoch_offset = 0, epoch_slice = slice
 
         if model_type == "GMVAE":
             axis_3.legend(loc = "best")
-            handles, labels = axis_3.get_legend_handles_labels()
+            handles, labels = axis_4.get_legend_handles_labels()
             labels, handles = zip(*sorted(zip(labels, handles),
                 key = lambda t: t[0]))
-            axis_3.legend(handles, labels, loc = "best")
-            axis_3.set_xlabel(x_label)
-            axis_3.set_ylabel("")
+            axis_4.legend(handles, labels, loc = "best")
+            axis_4.set_xlabel(x_label)
+            axis_4.set_ylabel("")
             if global_y_lim:
-                axis_3.set_ylim(axis_3_lim)
+                axis_4.set_ylim(axis_4_lim)
         else:
             axis_2.set_xlabel(x_label)
         figure.text(-0.01, 0.5, y_label, va = "center", rotation = "vertical")
