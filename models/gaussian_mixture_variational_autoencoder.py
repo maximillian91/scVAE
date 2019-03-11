@@ -1362,7 +1362,6 @@ class GaussianMixtureVariationalAutoencoder(object):
         
             training_label_ids = class_names_to_class_ids(training_set.labels)
 
-            # OBS: DO THE SAME FOR VALIDATION ETC.
             # Onehot encode labels
             labels_train = numpy.zeros(
                 (training_set.number_of_examples,
@@ -1384,6 +1383,24 @@ class GaussianMixtureVariationalAutoencoder(object):
             if validation_set:
                 validation_label_ids = class_names_to_class_ids(
                     validation_set.labels)
+
+                # Onehot encode labels
+                labels_valid = numpy.zeros(
+                    (validation_set.number_of_examples,
+                    validation_set.number_of_classes)
+                )
+
+                labels_valid[
+                    numpy.arange(validation_set.number_of_examples),
+                    validation_label_ids] = 1
+
+                mask_valid = numpy.zeros(validation_set.number_of_examples)
+                mask_valid[
+                    numpy.random.RandomState(seed=42).permutation(
+                        validation_set.number_of_examples)[
+                            :self.number_of_labeled_examples
+                        ]
+                ] = 1
         
             if training_set.excluded_classes:
                 excluded_class_ids = \
@@ -1561,7 +1578,6 @@ class GaussianMixtureVariationalAutoencoder(object):
                     
                     x_batch = x_train[batch_indices].toarray()
                     t_batch = t_train[batch_indices].toarray()
-                    # OBS: DEFINE LABELS_TRAIN from the IDs
                     labels_batch = labels_train[batch_indices]
                     mask_batch = mask_train[batch_indices]
                     
@@ -1666,9 +1682,13 @@ class GaussianMixtureVariationalAutoencoder(object):
                     subset = slice(i, min(i + batch_size, M_train))
                     x_batch = x_train[subset].toarray()
                     t_batch = t_train[subset].toarray()
+                    labels_batch = labels_train[subset]
+                    mask_batch = mask_train[subset]
                     feed_dict_batch = {
                         self.x: x_batch,
                         self.t: t_batch,
+                        self.labels: labels_batch,
+                        self.clf_mask: mask_batch,
                         self.is_training: False,
                         self.warm_up_weight: 1.0,
                         self.S_iw:
@@ -1883,9 +1903,13 @@ class GaussianMixtureVariationalAutoencoder(object):
                         subset = slice(i, min(i + batch_size, M_valid))
                         x_batch = x_valid[subset].toarray()
                         t_batch = t_valid[subset].toarray()
+                        labels_batch = labels_train[subset]
+                        mask_batch = mask_train[subset]
                         feed_dict_batch = {
                             self.x: x_batch,
                             self.t: t_batch,
+                            self.labels: labels_batch,
+                            self.clf_mask: mask_batch,
                             self.is_training: False,
                             self.warm_up_weight: 1.0,
                             self.S_iw:
@@ -2323,6 +2347,24 @@ class GaussianMixtureVariationalAutoencoder(object):
                 
             evaluation_label_ids = class_names_to_class_ids(
                 evaluation_set.labels)
+
+            # Onehot encode labels
+            labels_eval = numpy.zeros(
+                (evaluation_set.number_of_examples,
+                evaluation_set.number_of_classes)
+            )
+
+            labels_eval[
+                numpy.arange(evaluation_set.number_of_examples),
+                evaluation_label_ids] = 1
+
+            mask_eval = numpy.zeros(evaluation_set.number_of_examples)
+            mask_eval[
+                numpy.random.RandomState(seed=42).permutation(
+                    evaluation_set.number_of_examples)[
+                        :self.number_of_labeled_examples
+                    ]
+            ] = 1
             
             if evaluation_set.excluded_classes:
                 excluded_class_ids = class_names_to_class_ids(
@@ -2433,10 +2475,11 @@ class GaussianMixtureVariationalAutoencoder(object):
                 
                 subset_indices = numpy.array(list(
                     evaluation_subset_indices.intersection(indices)))
-                
                 feed_dict_batch = {
                     self.x: x_eval[indices].toarray(),
                     self.t: t_eval[indices].toarray(),
+                    self.labels: labels_eval[indices],
+                    self.clf_mask: mask_eval[indices],
                     self.is_training: False,
                     self.warm_up_weight: 1.0,
                     self.S_iw:
