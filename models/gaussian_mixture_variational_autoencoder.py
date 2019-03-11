@@ -1022,12 +1022,12 @@ class GaussianMixtureVariationalAutoencoder(object):
 
         # Mask for unlabeled examples
         mask_out_labeled = 1 - self.clf_mask
-        N_u = tf.cast(tf.reduce_sum(mask_out_labeled), 'float32')
-        N_l = tf.cast(tf.reduce_sum(mask_out_labeled), 'float32')
+        self.N_u = tf.cast(tf.reduce_sum(mask_out_labeled), 'float32')
+        self.N_l = tf.cast(tf.reduce_sum(self.clf_mask), 'float32')
 
         alpha = tf.where(
-            N_l > 0.0,
-            self.clf_weight * (N_u + N_l)/N_l,
+            self.N_l > 0.0,
+            self.clf_weight * (2 + 2*self.N_l),
             0.0
         )
 
@@ -1067,12 +1067,10 @@ class GaussianMixtureVariationalAutoencoder(object):
         self.ELBO = self.ENRE - self.KL
 
         # Classification error for labeled examples
-        self.CLF_ERROR = tf.losses.compute_weighted_loss(
-            tf.nn.softmax_cross_entropy_with_logits(
-                labels=self.labels,
-                logits=tf.reduce_mean(self.q_y_logits, 0)
-            ),
-            weights=self.clf_mask
+        self.CLF_ERROR = tf.losses.softmax_cross_entropy(
+            onehot_labels = self.labels,
+            logits = tf.reduce_mean(self.q_y_logits, 0),
+            weights = self.clf_mask
         )
 
         self.ELBO_weighted = self.ENRE - self.warm_up_weight * self.kl_weight * (
@@ -1083,7 +1081,7 @@ class GaussianMixtureVariationalAutoencoder(object):
         # )
         # tf.add_to_collection('losses', self.ELBO)
 
-        self.total_loss = self.ELBO_weighted + alpha * self.CLF_ERROR
+        self.total_loss = self.ELBO_weighted - alpha * self.CLF_ERROR
         
     
     def training(self):
@@ -1450,7 +1448,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                 "lower_bound": [],
                 "reconstruction_error": [],
                 "kl_divergence_z": [],
-                "kl_divergence_y": []
+                "kl_divergence_y": [],
+                "clf_error": []
             }
         }
         if validation_set:
@@ -1458,7 +1457,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                 "lower_bound": [],
                 "reconstruction_error": [],
                 "kl_divergence_z": [],
-                "kl_divergence_y": []
+                "kl_divergence_y": [],
+                "clf_error": []
             }
         
         with tf.Session(graph = self.graph, config=self.config) as session:
@@ -1605,8 +1605,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                             n_feature_train[batch_indices]
                     
                     # Run the stochastic batch training operation
-                    _, batch_loss = session.run(
-                        [self.train_op, self.ELBO],
+                    _, batch_loss, batch_clf_err = session.run(
+                        [self.train_op, self.ELBO, self.CLF_ERROR],
                         feed_dict = feed_dict_batch
                     )
                     
@@ -1616,9 +1616,9 @@ class GaussianMixtureVariationalAutoencoder(object):
                     # Print evaluation and output summaries
                     if (step + 1 - steps_per_epoch * epoch) in output_at_step:
                         
-                        print('Step {:d} ({}): {:.5g}.'.format(
+                        print('Step {:d} ({}): {:.5g} + {:.5g}.'.format(
                             int(step + 1), formatDuration(step_duration),
-                            batch_loss))
+                            batch_loss, batch_clf_err))
                         
                         if numpy.isnan(batch_loss):
                             status["completed"] = False
@@ -1660,6 +1660,7 @@ class GaussianMixtureVariationalAutoencoder(object):
                 KL_z_train = 0
                 KL_y_train = 0
                 ENRE_train = 0
+                CLF_ERR_train = 0
                 
                 q_y_probabilities = numpy.zeros(self.K)
                 q_z_means = numpy.zeros((self.K, self.latent_size))
@@ -1704,12 +1705,12 @@ class GaussianMixtureVariationalAutoencoder(object):
                         feed_dict_batch[self.n_feature] = \
                             n_feature_train[subset]
                     
-                    (ELBO_i, ENRE_i, KL_z_i, KL_y_i, z_KL_i,
+                    (ELBO_i, ENRE_i, KL_z_i, KL_y_i, z_KL_i, CLF_ERR_i,
                         q_y_probabilities_i, q_z_means_i, q_z_variances_i,
                         p_y_probabilities_i, p_z_means_i, p_z_variances_i,
                         q_y_logits_train_i, z_mean_i) = session.run(
                         [self.ELBO, self.ENRE,  self.KL_z, self.KL_y,
-                            self.KL_all, self.q_y_probabilities,
+                            self.KL_all, self.CLF_ERROR, self.q_y_probabilities,
                              self.q_z_means, self.q_z_variances,
                             self.p_y_probabilities, self.p_z_means,
                             self.p_z_variances, self.q_y_logits, self.z_mean],
@@ -1720,6 +1721,7 @@ class GaussianMixtureVariationalAutoencoder(object):
                     KL_z_train += KL_z_i
                     KL_y_train += KL_y_i
                     ENRE_train += ENRE_i
+                    CLF_ERR_train += CLF_ERR_i
                     
                     z_KL += z_KL_i
                     
@@ -1734,20 +1736,23 @@ class GaussianMixtureVariationalAutoencoder(object):
                     q_y_logits_train[subset] = q_y_logits_train_i
                     z_mean_train[subset] = z_mean_i 
                 
-                ELBO_train /= M_train / batch_size
-                KL_z_train /= M_train / batch_size
-                KL_y_train /= M_train / batch_size
-                ENRE_train /= M_train / batch_size
-                
-                z_KL /= M_train / batch_size
-                
-                q_y_probabilities /= M_train / batch_size
-                q_z_means /= M_train / batch_size
-                q_z_variances /= M_train / batch_size
-                
-                p_y_probabilities /= M_train / batch_size
-                p_z_means /= M_train / batch_size
-                p_z_variances /= M_train / batch_size
+                N_train_batches = M_train / batch_size
+
+                ELBO_train /= N_train_batches
+                KL_z_train /= N_train_batches
+                KL_y_train /= N_train_batches
+                ENRE_train /= N_train_batches
+                CLF_ERR_train /= N_train_batches
+
+                z_KL /= N_train_batches
+
+                q_y_probabilities /= N_train_batches
+                q_z_means /= N_train_batches
+                q_z_variances /= N_train_batches
+
+                p_y_probabilities /= N_train_batches
+                p_z_means /= N_train_batches
+                p_z_variances /= N_train_batches
                 
                 learning_curves["training"]["lower_bound"].append(ELBO_train)
                 learning_curves["training"]["reconstruction_error"].append(
@@ -1756,6 +1761,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                     KL_z_train)
                 learning_curves["training"]["kl_divergence_y"].append(
                     KL_y_train)
+                learning_curves["training"]["clf_error"].append(
+                    CLF_ERR_train)
                 
                 ### Accuracies
                 
@@ -1807,6 +1814,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                     simple_value = KL_z_train)
                 summary.value.add(tag="losses/kl_divergence_y",
                     simple_value = KL_y_train)
+                summary.value.add(tag="losses/clf_error",
+                    simple_value = CLF_ERR_train)               
                 summary.value.add(tag="accuracy",
                     simple_value = accuracy_train)
                 if accuracy_superset_train:
@@ -1865,7 +1874,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                     "ELBO: {:.5g}".format(ELBO_train),
                     "ENRE: {:.5g}".format(ENRE_train),
                     "KL_z: {:.5g}".format(KL_z_train),
-                    "KL_y: {:.5g}".format(KL_y_train)
+                    "KL_y: {:.5g}".format(KL_y_train),
+                    "CLF: {:.5g}".format(CLF_ERR_train),
                 ]
                 if accuracy_display:
                     evaluation_metrics.append(
@@ -1886,6 +1896,7 @@ class GaussianMixtureVariationalAutoencoder(object):
                     KL_z_valid = 0
                     KL_y_valid = 0
                     ENRE_valid = 0
+                    CLF_ERR_valid = 0
                     
                     q_y_probabilities = numpy.zeros(self.K)
                     q_z_means = numpy.zeros((self.K, self.latent_size))
@@ -1925,15 +1936,15 @@ class GaussianMixtureVariationalAutoencoder(object):
                             feed_dict_batch[self.n_feature] = \
                                 n_feature_valid[subset]
                         
-                        (ELBO_i, ENRE_i, KL_z_i, KL_y_i,
+                        (ELBO_i, ENRE_i, KL_z_i, KL_y_i, CLF_ERR_i,
                             q_y_probabilities_i, q_z_means_i, q_z_variances_i,
                             p_y_probabilities_i, p_z_means_i, p_z_variances_i,
                             q_y_logits_i, z_mean_i) = session.run(
                             [self.ELBO, self.ENRE, self.KL_z, self.KL_y,
-                                self.q_y_probabilities, self.q_z_means,
-                                self.q_z_variances, self.p_y_probabilities,
-                                self.p_z_means, self.p_z_variances,
-                                self.q_y_logits, self.z_mean],
+                                self.CLF_ERROR, self.q_y_probabilities,
+                                self.q_z_means, self.q_z_variances,
+                                self.p_y_probabilities, self.p_z_means,
+                                self.p_z_variances, self.q_y_logits, self.z_mean],
                             feed_dict = feed_dict_batch
                         )
                         
@@ -1941,6 +1952,7 @@ class GaussianMixtureVariationalAutoencoder(object):
                         KL_z_valid += KL_z_i
                         KL_y_valid += KL_y_i
                         ENRE_valid += ENRE_i
+                        CLF_ERR_valid += CLF_ERR_i
                         
                         q_y_probabilities += numpy.array(q_y_probabilities_i)
                         q_z_means += numpy.array(q_z_means_i)
@@ -1953,18 +1965,21 @@ class GaussianMixtureVariationalAutoencoder(object):
                         q_y_logits_valid[subset] = q_y_logits_i
                         z_mean_valid[subset] = z_mean_i 
                     
-                    ELBO_valid /= M_valid / batch_size
-                    KL_z_valid /= M_valid / batch_size
-                    KL_y_valid /= M_valid / batch_size
-                    ENRE_valid /= M_valid / batch_size
+                    N_valid_batches = M_valid / batch_size
+
+                    ELBO_valid /= N_valid_batches
+                    KL_z_valid /= N_valid_batches
+                    KL_y_valid /= N_valid_batches
+                    ENRE_valid /= N_valid_batches
+                    CLF_ERR_valid /= N_valid_batches
                     
-                    q_y_probabilities /= M_valid / batch_size
-                    q_z_means /= M_valid / batch_size
-                    q_z_variances /= M_valid / batch_size
+                    q_y_probabilities /= N_valid_batches
+                    q_z_means /= N_valid_batches
+                    q_z_variances /= N_valid_batches
                     
-                    p_y_probabilities /= M_valid / batch_size
-                    p_z_means /= M_valid / batch_size
-                    p_z_variances /= M_valid / batch_size
+                    p_y_probabilities /= N_valid_batches
+                    p_z_means /= N_valid_batches
+                    p_z_variances /= N_valid_batches
                     
                     learning_curves["validation"]["lower_bound"].append(ELBO_valid)
                     learning_curves["validation"]["reconstruction_error"].append(
@@ -1972,6 +1987,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                     learning_curves["validation"]["kl_divergence_z"].append(
                         KL_z_valid)
                     learning_curves["validation"]["kl_divergence_y"].append(
+                        KL_y_valid)
+                    learning_curves["validation"]["clf_error"].append(
                         KL_y_valid)
                     
                     ### Accuracies
@@ -2024,6 +2041,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                         simple_value = KL_z_valid)
                     summary.value.add(tag="losses/kl_divergence_y",
                         simple_value = KL_y_valid)
+                    summary.value.add(tag="losses/clf_error",
+                        simple_value = CLF_ERR_valid)
                     summary.value.add(tag="accuracy",
                         simple_value = accuracy_valid)
                     if accuracy_superset_valid:
@@ -2076,7 +2095,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                         "ELBO: {:.5g}".format(ELBO_valid),
                         "ENRE: {:.5g}".format(ENRE_valid),
                         "KL_z: {:.5g}".format(KL_z_valid),
-                        "KL_y: {:.5g}".format(KL_y_valid)
+                        "KL_y: {:.5g}".format(KL_y_valid),
+                        "CLF: {:.5g}".format(CLF_ERR_valid),
                     ]
                     if accuracy_display:
                         evaluation_metrics.append(
