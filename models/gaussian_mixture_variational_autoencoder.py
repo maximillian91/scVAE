@@ -179,7 +179,8 @@ class GaussianMixtureVariationalAutoencoder(object):
         self.stopped_early = None
         
         # Graph setup
-        
+        self.config = tf.ConfigProto()
+        self.config.gpu_options.allow_growth = True
         self.graph = tf.Graph()
         
         self.parameter_summary_list = []
@@ -1460,7 +1461,7 @@ class GaussianMixtureVariationalAutoencoder(object):
                 "kl_divergence_y": []
             }
         
-        with tf.Session(graph = self.graph) as session:
+        with tf.Session(graph = self.graph, config=self.config) as session:
             
             parameter_summary_writer = tf.summary.FileWriter(
                 log_directory)
@@ -2415,7 +2416,7 @@ class GaussianMixtureVariationalAutoencoder(object):
         
         # Evaluation
         
-        with tf.Session(graph = self.graph) as session:
+        with tf.Session(graph = self.graph, config=self.config) as session:
             
             if log_results:
                 eval_summary_writer = tf.summary.FileWriter(
