@@ -610,8 +610,8 @@ def analyseModel(model, run_id = None, analyses = ["default"],
             print()
 
 def analyseIntermediateResults(learning_curves = None, epoch_start = None,
-    epoch = None, latent_values = None, data_set = None, centroids = None,
-    model_name = None, run_id = None, model_type = None,
+    epoch = None, latent_values = None, data_set = None, label_mask = None, 
+    centroids = None, model_name = None, run_id = None, model_type = None,
     results_directory = "results"):
     
     if run_id:
@@ -709,6 +709,7 @@ def analyseIntermediateResults(learning_curves = None, epoch_start = None,
                 latent_values_decomposed,
                 colour_coding = "labels",
                 colouring_data_set = data_set,
+                label_mask = label_mask,
                 centroids = centroids_decomposed,
                 figure_labels = figure_labels,
                 name = name
@@ -4631,8 +4632,8 @@ def plotModelMetricSets(
     return figure, figure_name
 
 def plotValues(values, colour_coding = None, colouring_data_set = None,
-    centroids = None, class_name = None, feature_index = None,
-    figure_labels = None, prediction_details = None,
+    label_mask = None, centroids = None, class_name = None,
+    feature_index = None, figure_labels = None, prediction_details = None,
     axis_limits = None, example_tag = None, name = "scatter"):
     
     # Setup
@@ -4673,6 +4674,11 @@ def plotValues(values, colour_coding = None, colouring_data_set = None,
     random_state = numpy.random.RandomState(117)
     shuffled_indices = random_state.permutation(M)
     values = values[shuffled_indices]
+
+    if label_mask is not None:
+        label_mask = numpy.array(label_mask.copy(), dtype=bool)
+    else:
+        label_mask = numpy.zeros((M,), dtype=bool)
     
     if axis_limits:
         
@@ -4790,6 +4796,7 @@ def plotValues(values, colour_coding = None, colouring_data_set = None,
         
         # Examples are shuffled, so should their labels be
         labels = labels[shuffled_indices]
+        label_mask = label_mask[shuffled_indices]
         
         if "labels" in colour_coding or "ids" in colour_coding:
             colours = []
@@ -4798,14 +4805,50 @@ def plotValues(values, colour_coding = None, colouring_data_set = None,
             for i, label in enumerate(labels):
                 colour = class_palette[label]
                 colours.append(colour)
-            
+
+                if label_mask[i]:
+                    label_ext = str(label) + ' (labeled)'
+                    label_marker = 'X'
+                    label_edgecolor = 'k'
+                else:
+                    label_ext = label
+                    label_marker = '.'
+                    label_edgecolor = 'face'
+
+                
                 # Plot one example for each class to add labels
-                if label not in classes:
-                    classes.add(label)
-                    axis.scatter(values[i, 0], values[i, 1], color = colour,
-                        label = label)
-            
-            axis.scatter(values[:, 0], values[:, 1], c = colours)
+                if label_ext not in classes:
+                    classes.add(label_ext)
+                    axis.scatter(values[i, 0], values[i, 1],
+                        color = colour, label = label,
+                        marker = label_marker, edgecolors = label_edgecolor
+                    )
+
+            colours = numpy.array(colours)
+
+            # Plot unlabeled data points
+            not_label_mask = numpy.logical_not(label_mask)
+            if numpy.any(not_label_mask):
+                axis.scatter(
+                    values[not_label_mask, 0],
+                    values[not_label_mask, 1],
+                    s = 30,
+                    c = colours[not_label_mask],
+                    marker = '.',
+                    edgecolors = 'face',
+                    alpha = 0.5
+                )
+
+            # Plot labeled data points with X marker.
+            if numpy.any(label_mask):
+                axis.scatter(
+                    values[label_mask, 0],
+                    values[label_mask, 1],
+                    s = 30,
+                    c = colours[label_mask],
+                    marker = 'X',
+                    edgecolors = 'k'
+                )
             
             class_handles, class_labels = axis.get_legend_handles_labels()
             
