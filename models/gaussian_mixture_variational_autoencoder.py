@@ -848,11 +848,11 @@ class GaussianMixtureVariationalAutoencoder(object):
             tf.reshape(self.z[k], [self.S_iw, self.S_mc, -1, self.latent_size])
             for k in range(self.K)
         ]
-        
+        self.q_y_given_x_entropy = self.q_y_given_x.entropy()
         if self.prior_probabilities_method == "uniform":
             # H[q(y|x)] = -E_{q(y|x)}[ log(q(y|x)) ]
             # (B)
-            q_y_given_x_entropy = self.q_y_given_x.entropy()
+            # self.q_y_given_x_entropy = self.q_y_given_x.entropy()
             # H[q(y|x)||p(y)] = -E_{q(y|x)}[log(p(y))] = -E_{q(y|x)}[ log(1/K)]
             #                 = log(K)
             # ()
@@ -861,7 +861,7 @@ class GaussianMixtureVariationalAutoencoder(object):
             #          = -E_q(y|x)[log p(y)] + E_q(y|x)[log q(y|x)]
             #          = H(q|p) - H(q)
             # (B)
-            KL_y = p_y_entropy - q_y_given_x_entropy
+            KL_y = p_y_entropy - self.q_y_given_x_entropy
         else:
             KL_y = kl_divergence(self.q_y_given_x, self.p_y)
             p_y_entropy = tf.squeeze(self.p_y.entropy())
@@ -1674,6 +1674,8 @@ class GaussianMixtureVariationalAutoencoder(object):
                     numpy.float32)
                 z_mean_train = numpy.zeros((M_train, self.latent_size),
                     numpy.float32)
+                q_y_entropies = numpy.zeros((M_train,),
+                    numpy.float32)
                 
                 if "mixture" in self.latent_distribution_name: 
                     z_KL = numpy.zeros(1)                
@@ -1708,12 +1710,13 @@ class GaussianMixtureVariationalAutoencoder(object):
                     (ELBO_i, ENRE_i, KL_z_i, KL_y_i, z_KL_i, CLF_ERR_i,
                         q_y_probabilities_i, q_z_means_i, q_z_variances_i,
                         p_y_probabilities_i, p_z_means_i, p_z_variances_i,
-                        q_y_logits_train_i, z_mean_i) = session.run(
+                        q_y_logits_train_i, z_mean_i, q_y_entropies_i) = session.run(
                         [self.ELBO, self.ENRE,  self.KL_z, self.KL_y,
                             self.KL_all, self.CLF_ERROR, self.q_y_probabilities,
                              self.q_z_means, self.q_z_variances,
                             self.p_y_probabilities, self.p_z_means,
-                            self.p_z_variances, self.q_y_logits, self.z_mean],
+                            self.p_z_variances, self.q_y_logits, self.z_mean,
+                            self.q_y_given_x_entropy],
                         feed_dict = feed_dict_batch
                     )
                     
@@ -1734,7 +1737,9 @@ class GaussianMixtureVariationalAutoencoder(object):
                     p_z_variances += numpy.array(p_z_variances_i)
                     
                     q_y_logits_train[subset] = q_y_logits_train_i
-                    z_mean_train[subset] = z_mean_i 
+                    z_mean_train[subset] = z_mean_i
+
+                    q_y_entropies[subset] = q_y_entropies_i
                 
                 N_train_batches = M_train / batch_size
 
@@ -1764,6 +1769,21 @@ class GaussianMixtureVariationalAutoencoder(object):
                 learning_curves["training"]["clf_error"].append(
                     CLF_ERR_train)
                 
+                ### Active learning label acquisition of max entropy point
+                q_y_entropies[numpy.array(mask_train, dtype=bool)] = -1e6
+                max_entropy_ind = numpy.argmax(
+                    q_y_entropies,
+                    0
+                )
+                mask_train[max_entropy_ind] = 1
+                print("\tAdded labeled data point number {}/{} with index {} and label {}.\n".format(
+                        numpy.sum(mask_train),
+                        M_train,
+                        max_entropy_ind,
+                        training_set.labels[max_entropy_ind]
+                    )
+                )
+
                 ### Accuracies
                 
                 training_cluster_ids = q_y_logits_train.argmax(axis = 1)
@@ -2196,52 +2216,55 @@ class GaussianMixtureVariationalAutoencoder(object):
                         epoch % plotting_interval == 0
 
                 if plot_intermediate_results:
-                    
-                    if "mixture" in self.latent_distribution_name:
-                        K = self.K
-                        L = self.latent_size
-                        p_z_covariance_matrices = numpy.empty([K, L, L])
-                        q_z_covariance_matrices = numpy.empty([K, L, L])
-                        for k in range(K):
-                            p_z_covariance_matrices[k] = numpy.diag(
-                                p_z_variances[k])
-                            q_z_covariance_matrices[k] = numpy.diag(
-                                q_z_variances[k])
-                        centroids = {
-                            "prior": {
-                                "probabilities": p_y_probabilities,
-                                "means": numpy.stack(p_z_means),
-                                "covariance_matrices": p_z_covariance_matrices
-                            },
-                            "posterior": {
-                                "probabilities": q_y_probabilities,
-                                "means": q_z_means,
-                                "covariance_matrices": q_z_covariance_matrices
+                    for data_set in ['training', 'validation']:                  
+                        if "mixture" in self.latent_distribution_name:
+                            K = self.K
+                            L = self.latent_size
+                            p_z_covariance_matrices = numpy.empty([K, L, L])
+                            q_z_covariance_matrices = numpy.empty([K, L, L])
+                            for k in range(K):
+                                p_z_covariance_matrices[k] = numpy.diag(
+                                    p_z_variances[k])
+                                q_z_covariance_matrices[k] = numpy.diag(
+                                    q_z_variances[k])
+                            centroids = {
+                                "prior": {
+                                    "probabilities": p_y_probabilities,
+                                    "means": numpy.stack(p_z_means),
+                                    "covariance_matrices": p_z_covariance_matrices
+                                },
+                                "posterior": {
+                                    "probabilities": q_y_probabilities,
+                                    "means": q_z_means,
+                                    "covariance_matrices": q_z_covariance_matrices
+                                }
                             }
-                        }
-                    else:
-                        centroids = None
-                    
-                    if validation_set:
-                        intermediate_latent_values = z_mean_valid
-                        intermediate_data_set = validation_set
-                    else:
-                        intermediate_latent_values = z_mean_train
-                        intermediate_data_set = training_set
-                    
-                    analyseIntermediateResults(
-                        learning_curves = learning_curves,
-                        epoch_start = epoch_start,
-                        epoch = epoch,
-                        latent_values = intermediate_latent_values,
-                        data_set = intermediate_data_set,
-                        centroids = centroids,
-                        model_name = self.name,
-                        run_id = run_id,
-                        model_type = self.type,
-                        results_directory = self.base_results_directory
-                    )
-                    print()
+                        else:
+                            centroids = None
+                        
+                        if validation_set and data_set == 'validation':
+                            intermediate_latent_values = z_mean_valid
+                            intermediate_data_set = validation_set
+                            intermediate_mask = mask_valid
+                        elif data_set == 'training':
+                            intermediate_latent_values = z_mean_train
+                            intermediate_data_set = training_set
+                            intermediate_mask = mask_train
+                        
+                        analyseIntermediateResults(
+                            learning_curves = learning_curves,
+                            epoch_start = epoch_start,
+                            epoch = epoch,
+                            latent_values = intermediate_latent_values,
+                            data_set = intermediate_data_set,
+                            label_mask = intermediate_mask,
+                            centroids = centroids,
+                            model_name = self.name,
+                            run_id = run_id,
+                            model_type = self.type,
+                            results_directory = self.base_results_directory
+                        )
+                        print()
                 else:
                     analyseIntermediateResults(
                         learning_curves = learning_curves,
