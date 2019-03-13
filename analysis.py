@@ -702,7 +702,7 @@ def analyseIntermediateResults(learning_curves = None, epoch_start = None,
         plot_time_start = time()
     
         epoch_name = "epoch-{}".format(epoch + 1)
-        name = "latent_space-" + epoch_name
+        name = "latent_space-" + data_set.kind + '-' + epoch_name
     
         if data_set.labels is not None:
             figure, figure_name = plotValues(
