@@ -1156,7 +1156,7 @@ class GaussianMixtureVariationalAutoencoder(object):
     
     def train(self, training_set, validation_set = None,
         number_of_epochs = 100, batch_size = 100, learning_rate = 1e-3,
-        plotting_interval = None,
+        plotting_interval = None, acquisition = 'random',
         run_id = None, new_run = False, reset_training = False,
         temporary_log_directory = None):
         
@@ -1769,20 +1769,38 @@ class GaussianMixtureVariationalAutoencoder(object):
                 learning_curves["training"]["clf_error"].append(
                     CLF_ERR_train)
                 
+                mask_train_bool = numpy.array(mask_train, dtype=bool)
                 ### Active learning label acquisition of max entropy point
-                q_y_entropies[numpy.array(mask_train, dtype=bool)] = -1e6
-                max_entropy_ind = numpy.argmax(
-                    q_y_entropies,
-                    0
-                )
-                mask_train[max_entropy_ind] = 1
-                print("\tAdded labeled data point number {}/{} with index {} and label {}.\n".format(
-                        numpy.sum(mask_train),
-                        M_train,
-                        max_entropy_ind,
-                        training_set.labels[max_entropy_ind]
+                if acquisition == 'random':
+                    mask_unlabeled = numpy.logical_not(mask_train_bool)
+                    unlabeled_indices = numpy.arange(M_train)[mask_unlabeled]
+                    unlabeled_indices_shuffled = unlabeled_indices[
+                        numpy.random.permutation(numpy.sum(mask_unlabeled))
+                    ]
+                    rand_unlabeled_ind = unlabeled_indices_shuffled[0]
+                    mask_train[rand_unlabeled_ind] = 1
+                    print("\tAdded labeled data point number {}/{} with index {} and label {}.\n".format(
+                            numpy.sum(mask_train),
+                            M_train,
+                            rand_unlabeled_ind,
+                            training_set.labels[rand_unlabeled_ind]
+                        )
                     )
-                )
+                elif acquisition == 'max_entropy':
+                    q_y_entropies[mask_train_bool] = -1e6
+                    max_entropy_ind = numpy.argmax(
+                        q_y_entropies,
+                        0
+                    )
+                    mask_train[max_entropy_ind] = 1
+                    print("\tAdded labeled data point number {}/{} with index {} and label {}.\n".format(
+                            numpy.sum(mask_train),
+                            M_train,
+                            max_entropy_ind,
+                            training_set.labels[max_entropy_ind]
+                        )
+                    )
+
 
                 ### Accuracies
                 

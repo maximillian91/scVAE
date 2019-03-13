@@ -82,7 +82,7 @@ def main(input_file_or_name, data_directory = "data",
     dropout_keep_probabilities = [],
     count_sum = True,
     number_of_epochs = 200, plotting_interval_during_training = None, 
-    batch_size = 100, learning_rate = 1e-4,
+    batch_size = 100, learning_rate = 1e-4, acquisition = 'random',
     run_id = None, new_run = False,
     prediction_method = None, prediction_training_set_name = "training",
     prediction_decomposition_method = None,
@@ -1081,6 +1081,12 @@ parser.add_argument(
     type = float,
     default = 1e-4,
     help = "learning rate when training"
+)
+parser.add_argument(
+    "--acquisition", "-a",
+    type = str,
+    default = "random",
+    help = "method to acquire new active learning data points"
 )
 parser.add_argument(
     "--number-of-warm-up-epochs", "-w",
